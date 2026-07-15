@@ -1,6 +1,7 @@
-// agent.js — 1000 Boulevard of the Arts citation research engine
-// Runs each prompt through Claude with live web search, then analyzes
-// the response for brand citations, mentions, sources, and competitors.
+// agent.js — 1000 Boulevard of the Arts citation research engine (v2)
+// Upgraded to match the original Cotton & Company agent's analysis depth:
+// captures brand POSITION (e.g. "#1 of 5") and per-competitor cited/mentioned
+// status, so the report's Position column and "Also:" lines populate.
 'use strict';
 
 const MODEL = 'claude-haiku-4-5-20251001';
@@ -58,7 +59,7 @@ async function runSearchPrompt(apiKey, promptText) {
   return { answer, sources };
 }
 
-// Step 2 — analyze the answer for brand status + competitors
+// Step 2 — analyze the answer for brand status, position, sources, competitors
 async function analyzeAnswer(apiKey, promptText, answer, sources) {
   const analysisPrompt = `You are a brand-visibility analyst. Analyze the AI search answer below.
 
@@ -73,12 +74,17 @@ ${answer}
 SOURCE URLS: ${sources.join(', ') || 'none captured'}
 
 Respond ONLY with JSON, no markdown fences, in exactly this shape:
-{"brand_status":"cited|mentioned|absent","brand_context":"one sentence on how the brand appeared or why it was absent","competitors_named":["names actually appearing in the answer"],"cited_sources":["domains credited in the answer"],"owned_source":true_or_false}
-"cited" = brand named AND a source link/domain credits it. "mentioned" = named with no source. "absent" = not named. owned_source = any cited source is on ${BRAND_DOMAIN}.`;
+{"brand_status":"cited|mentioned|absent","position":"e.g. #1 of 5, or empty string if not applicable","brand_context":"2-3 sentences on how the brand appeared (or why absent), how it was described, and how competitors appeared","competitors_named":[{"name":"competitor name as it appeared","status":"cited|mentioned"}],"cited_sources":["domains credited in the answer"],"owned_source":true_or_false}
+
+Rules:
+- "cited" = brand named AND a source link/domain credits it. "mentioned" = named with no source. "absent" = not named.
+- "position" = the brand's rank among options the answer presents (e.g. "#1 of 5"). Empty string if the answer isn't a ranked/list-style response or the brand is absent.
+- competitors_named = ONLY competitors from the list that actually appear in the answer, each with cited or mentioned status.
+- owned_source = true if any cited source is on ${BRAND_DOMAIN}.`;
 
   const data = await callClaude(apiKey, {
     model: MODEL,
-    max_tokens: 600,
+    max_tokens: 700,
     messages: [{ role: 'user', content: analysisPrompt }],
   });
   const raw = (data.content || [])
@@ -90,9 +96,14 @@ Respond ONLY with JSON, no markdown fences, in exactly this shape:
   try {
     return JSON.parse(raw);
   } catch (e) {
+    // Fallback detection: simple text scan so a parse failure never loses a data point
+    const named = answer.toLowerCase().includes(BRAND.toLowerCase());
     return {
-      brand_status: 'error',
-      brand_context: 'Analysis response could not be parsed.',
+      brand_status: named ? 'mentioned' : 'error',
+      position: '',
+      brand_context: named
+        ? 'Fallback detection: brand mentioned in response. Manual review recommended.'
+        : 'Analysis response could not be parsed.',
       competitors_named: [],
       cited_sources: [],
       owned_source: false,
@@ -109,12 +120,19 @@ async function runCitationResearch({ apiKey, prompts, onProgress }) {
       const { answer, sources } = await runSearchPrompt(apiKey, p.text);
       await sleep(DELAY_MS);
       const analysis = await analyzeAnswer(apiKey, p.text, answer, sources);
+      // Normalize competitors to "Name (status)" display strings + keep structure
+      const compList = Array.isArray(analysis.competitors_named) ? analysis.competitors_named : [];
+      const compStructured = compList.map((c) =>
+        typeof c === 'string' ? { name: c, status: 'mentioned' } : c
+      );
       results.push({
         prompt: p.text,
         cluster: p.cluster,
         brand_status: analysis.brand_status || 'absent',
+        position: analysis.position || '',
         brand_context: analysis.brand_context || '',
-        competitors_named: analysis.competitors_named || [],
+        competitors_named: compStructured.map((c) => `${c.name} (${c.status})`),
+        competitors_structured: compStructured,
         cited_sources: analysis.cited_sources || [],
         owned_source: !!analysis.owned_source,
         raw_sources: sources,
@@ -122,8 +140,8 @@ async function runCitationResearch({ apiKey, prompts, onProgress }) {
     } catch (err) {
       console.error(`  ✗ Prompt ${i + 1} failed: ${err.message}`);
       results.push({
-        prompt: p.text, cluster: p.cluster, brand_status: 'error',
-        brand_context: err.message, competitors_named: [],
+        prompt: p.text, cluster: p.cluster, brand_status: 'error', position: '',
+        brand_context: err.message, competitors_named: [], competitors_structured: [],
         cited_sources: [], owned_source: false, raw_sources: [],
       });
     }
@@ -153,11 +171,16 @@ function summarizeResults(results, prevResults) {
     if (r.brand_status === 'mentioned') clusters[r.cluster].mentioned++;
   });
 
+  // Per-competitor cited/mentioned tallies (matches the original report's columns)
   const compScores = {};
-  COMPETITORS.forEach((c) => { compScores[c] = 0; });
-  results.forEach((r) => (r.competitors_named || []).forEach((c) => {
-    const match = COMPETITORS.find((k) => c.toLowerCase().includes(k.toLowerCase()) || k.toLowerCase().includes(c.toLowerCase()));
-    if (match) compScores[match]++;
+  COMPETITORS.forEach((c) => { compScores[c] = { cited: 0, mentioned: 0 }; });
+  results.forEach((r) => (r.competitors_structured || []).forEach((c) => {
+    const match = COMPETITORS.find((k) =>
+      c.name.toLowerCase().includes(k.toLowerCase()) || k.toLowerCase().includes(c.name.toLowerCase()));
+    if (match) {
+      if (c.status === 'cited') compScores[match].cited++;
+      else compScores[match].mentioned++;
+    }
   }));
 
   let delta = null;
