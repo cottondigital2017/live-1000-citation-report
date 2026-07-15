@@ -1,13 +1,15 @@
 # .github/workflows/citation.yml
 # Weekly AI citation report — 1000 Boulevard of the Arts
-# Runs every Monday at 8:00 AM ET (12:00 UTC), or manually via Run workflow.
+# Runs every Monday at 9:00 AM ET (13:00 UTC), or manually via Run workflow.
+# Staggered one hour after the Cotton & Company agent (8 AM ET) so the two
+# runs never compete for the same Anthropic API rate limit.
 # NOTE: No push trigger — commits will NOT start a run.
 
 name: Weekly AI citation report — 1000 Boulevard of the Arts
 
 on:
   schedule:
-    - cron: '0 12 * * 1'
+    - cron: '0 13 * * 1'
   workflow_dispatch:
 
 jobs:
