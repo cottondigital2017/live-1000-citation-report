@@ -22,7 +22,7 @@ Required secrets
 
 Set under Settings → Secrets and variables → Actions:
 
-SecretValueANTHROPIC_API_KEYAnthropic API key (console.anthropic.com)GMAIL_APP_PASSWORD16-character app password created while signed into the sending Gmail account (2-Step Verification required)EMAIL_FROMangelene.mccullough@gmail.comEMAIL_TOcottonclients@gmail.com
+SecretValueANTHROPIC_API_KEYAnthropic API key (console.anthropic.com)GMAIL_APP_PASSWORD16-character app password created while signed into the sending Gmail account (2-Step Verification required)EMAIL_FROMadmin@cottonco.comEMAIL_TOcottonclients@gmail.com
 
 Running it manually
 
