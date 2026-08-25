@@ -1,0 +1,53 @@
+name: API key test
+on: workflow_dispatch
+
+jobs:
+  test-api:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm install
+
+      - name: Test Anthropic key
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          cat > api-test.js <<'EOF'
+          const { PROMPTS } = require('./prompts');
+          const { runCitationResearch } = require('./agent');
+          const key = process.env.ANTHROPIC_API_KEY;
+
+          console.log('--- Pre-flight ---');
+          console.log('Key set:', !!key);
+          console.log('Key length:', (key || '').length);
+          console.log('Starts with sk-ant-:', (key || '').startsWith('sk-ant-'));
+          console.log('Has whitespace:', /\s/.test(key || ''), '(expect false)');
+
+          (async () => {
+            // 1. Auth check — costs nothing
+            const r = await fetch('https://api.anthropic.com/v1/models', {
+              headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01' },
+            });
+            console.log('\n/v1/models status:', r.status);
+            const body = await r.json();
+            if (!r.ok) {
+              console.error('✗ AUTH FAILED:', JSON.stringify(body));
+              process.exit(1);
+            }
+            console.log('✓ Key authenticates. Models available:',
+              (body.data || []).map(m => m.id).join(', '));
+
+            // 2. One real prompt through your actual agent code
+            console.log('\n--- Running 1 prompt ---');
+            const results = await runCitationResearch({
+              apiKey: key,
+              prompts: PROMPTS.slice(0, 1),
+              onProgress: (i, t, p) => console.log(`[${i}/${t}] ${p.slice(0, 60)}…`),
+            });
+            console.log(JSON.stringify(results[0], null, 2).slice(0, 1500));
+          })().catch(e => { console.error('✗ FAILED:', e.message); process.exit(1); });
+          EOF
+          node api-test.js
