@@ -1,0 +1,32 @@
+name: SMTP credential test
+on: workflow_dispatch
+
+jobs:
+  test-smtp:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm install nodemailer
+      - name: Send test email
+        env:
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
+          EMAIL_TO: ${{ secrets.EMAIL_TO }}
+        run: |
+          node -e "
+          const nodemailer = require('nodemailer');
+          const t = nodemailer.createTransport({
+            service: 'gmail',
+            auth: { user: process.env.EMAIL_FROM, pass: process.env.GMAIL_APP_PASSWORD }
+          });
+          t.sendMail({
+            from: process.env.EMAIL_FROM,
+            to: process.env.EMAIL_TO,
+            subject: 'SMTP test — citation report',
+            text: 'If you are reading this, the app password works.'
+          }).then(i => console.log('OK:', i.messageId))
+            .catch(e => { console.error('FAILED:', e.message); process.exit(1); });
+          "
