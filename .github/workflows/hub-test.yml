@@ -1,0 +1,44 @@
+name: Hub push test
+on: workflow_dispatch
+
+jobs:
+  test-hub:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm install
+
+      - name: Push a dummy run
+        env:
+          CCH_ENDPOINT: ${{ secrets.CCH_ENDPOINT }}
+          CCH_TOKEN: ${{ secrets.CCH_TOKEN }}
+          CCH_SLUG: ${{ secrets.CCH_SLUG }}
+        run: |
+          cat > hub-test.js <<'EOF'
+          const { pushToHub } = require('./hub-push');
+
+          console.log('--- Pre-flight ---');
+          console.log('CCH_ENDPOINT set:', !!process.env.CCH_ENDPOINT);
+          console.log('CCH_TOKEN set:', !!process.env.CCH_TOKEN);
+          console.log('CCH_SLUG:', process.env.CCH_SLUG || '(unset)');
+          console.log('------------------');
+
+          pushToHub({
+            slug: process.env.CCH_SLUG,
+            runDate: '2020-01-01',                 // obvious test date
+            summary: { citationRate: 1, visibilityRate: 1, cited: 1,
+                       mentioned: 0, absent: 0, errors: 0, total: 1,
+                       ownedSourceCount: 0, competitorCounts: {} },
+            results: [{ prompt: 'HUB WIRING TEST — safe to delete',
+                        cluster: 'test', brand_status: 'cited',
+                        cited_sources: ['example.com'] }],
+            agentVersion: 'hub-test',
+          }).then(ok => {
+            if (!ok) { console.error('✗ Push did not succeed — see the warning above.'); process.exit(1); }
+            console.log('✓ Wiring confirmed.');
+          });
+          EOF
+          node hub-test.js
